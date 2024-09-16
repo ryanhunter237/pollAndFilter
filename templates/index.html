@@ -15,14 +15,47 @@
         padding: 2px;
         margin: 2px;
       }
+      #filter-container {
+        margin-bottom: 10px;
+      }
+      .hidden {
+        display: none;
+      }
     </style>
   </head>
   <body>
+    <div id="filter-container">
+      <input
+        type="text"
+        id="filename-filter"
+        placeholder="Filter by filename"
+      />
+      <button id="clear-filter">Clear</button>
+    </div>
     <table id="files-table">
       <!-- The table will be populated by JavaScript -->
     </table>
 
     <script>
+      let currentData = {};
+      let filenameFilter = "";
+      let isFilterActive = false;
+
+      document
+        .getElementById("filename-filter")
+        .addEventListener("input", (event) => {
+          filenameFilter = event.target.value.toLowerCase();
+          isFilterActive = filenameFilter !== "";
+          applyFilter();
+        });
+
+      document.getElementById("clear-filter").addEventListener("click", () => {
+        document.getElementById("filename-filter").value = "";
+        filenameFilter = "";
+        isFilterActive = false;
+        applyFilter();
+      });
+
       async function fetchData() {
         const response = await fetch("/api/files_and_tags");
         const data = await response.json();
@@ -40,10 +73,22 @@
         return reorganizedData;
       }
 
-      let currentData = {};
+      function createGroupRow(group_id) {
+        const groupRow = document.createElement("tr");
+        groupRow.setAttribute("data-group-id", group_id);
+
+        const groupCell = document.createElement("td");
+        groupCell.setAttribute("colspan", "2");
+        groupCell.textContent = group_id;
+        groupRow.appendChild(groupCell);
+
+        return groupRow;
+      }
 
       function createFileRow(file_id, file) {
         const row = document.createElement("tr");
+        row.setAttribute("data-file-id", file_id);
+        row.setAttribute("data-group-id", file.group_id);
 
         const filenameCell = document.createElement("td");
         filenameCell.textContent = file.filename;
@@ -79,64 +124,71 @@
         for (const group_id in data) {
           if (!currentData.hasOwnProperty(group_id)) {
             // New group_id
-            const groupRow = document.createElement("tr");
-            const groupCell = document.createElement("td");
-            groupCell.setAttribute("colspan", "2");
-            groupCell.textContent = group_id;
-            groupRow.appendChild(groupCell);
+            const groupRow = createGroupRow(group_id);
             table.appendChild(groupRow);
-
             groupRows[group_id] = groupRow;
+          }
+          const groupRow = groupRows[group_id];
 
-            // Add file rows
-            for (const file_id in data[group_id]) {
-              const file = data[group_id][file_id];
-              const fileRow = createFileRow(file_id, file);
-              table.appendChild(fileRow);
+          for (const file_id in data[group_id]) {
+            const file = data[group_id][file_id];
+            if (
+              !currentData[group_id] ||
+              !currentData[group_id].hasOwnProperty(file_id)
+            ) {
+              // New file_id
+              const fileRow = createFileRow(file_id, { ...file, group_id });
+              // Insert after the last file in the group
+              let insertAfterRow = groupRow;
+              let nextSibling = groupRow.nextSibling;
+              while (
+                nextSibling &&
+                nextSibling.getAttribute("data-group-id") === group_id
+              ) {
+                insertAfterRow = nextSibling;
+                nextSibling = nextSibling.nextSibling;
+              }
+              table.insertBefore(fileRow, insertAfterRow.nextSibling);
               fileRows[file_id] = fileRow;
-            }
-          } else {
-            // Existing group_id
-            for (const file_id in data[group_id]) {
-              const file = data[group_id][file_id];
-              if (!currentData[group_id].hasOwnProperty(file_id)) {
-                // New file_id
-                const fileRow = createFileRow(file_id, file);
-                // Insert after the last file in the group
-                const groupRow = groupRows[group_id];
-                let nextSibling = groupRow.nextSibling;
-                while (
-                  nextSibling &&
-                  !nextSibling.firstChild.hasAttribute("colspan")
-                ) {
-                  nextSibling = nextSibling.nextSibling;
-                }
-                table.insertBefore(fileRow, nextSibling);
-                fileRows[file_id] = fileRow;
-              } else {
-                // Existing file_id, check for tag updates
-                const currentFile = currentData[group_id][file_id];
-                if (
-                  JSON.stringify(file.tags) !== JSON.stringify(currentFile.tags)
-                ) {
-                  // Update tags
-                  const fileRow = fileRows[file_id];
-                  const tagsCell = fileRow.children[1];
-                  tagsCell.innerHTML = "";
-                  file.tags.forEach((tag) => {
-                    const tagDiv = document.createElement("div");
-                    tagDiv.className = "tag";
-                    tagDiv.textContent = tag;
-                    tagsCell.appendChild(tagDiv);
-                  });
-                }
+            } else {
+              // Existing file_id, check for tag updates
+              const currentFile = currentData[group_id][file_id];
+              if (
+                JSON.stringify(file.tags) !== JSON.stringify(currentFile.tags)
+              ) {
+                // Update tags
+                const fileRow = fileRows[file_id];
+                const tagsCell = fileRow.children[1];
+                tagsCell.innerHTML = "";
+                file.tags.forEach((tag) => {
+                  const tagDiv = document.createElement("div");
+                  tagDiv.className = "tag";
+                  tagDiv.textContent = tag;
+                  tagsCell.appendChild(tagDiv);
+                });
               }
             }
 
-            // Remove files that no longer exist
-            for (const file_id in currentData[group_id]) {
-              if (!data[group_id].hasOwnProperty(file_id)) {
-                const fileRow = fileRows[file_id];
+            // Apply filter to the file row
+            const fileRow = fileRows[file_id];
+            if (isFilterActive) {
+              if (file.filename.toLowerCase().includes(filenameFilter)) {
+                fileRow.classList.remove("hidden");
+              } else {
+                fileRow.classList.add("hidden");
+              }
+            } else {
+              fileRow.classList.remove("hidden");
+            }
+          }
+        }
+
+        // Remove files that no longer exist
+        for (const group_id in currentData) {
+          for (const file_id in currentData[group_id]) {
+            if (!data[group_id] || !data[group_id].hasOwnProperty(file_id)) {
+              const fileRow = fileRows[file_id];
+              if (fileRow) {
                 table.removeChild(fileRow);
                 delete fileRows[file_id];
               }
@@ -144,23 +196,74 @@
           }
         }
 
-        // Remove groups that no longer exist
-        for (const group_id in currentData) {
+        // Remove groups that no longer exist or have no visible files
+        for (const group_id in groupRows) {
           if (!data.hasOwnProperty(group_id)) {
             const groupRow = groupRows[group_id];
             table.removeChild(groupRow);
             delete groupRows[group_id];
-
-            for (const file_id in currentData[group_id]) {
-              const fileRow = fileRows[file_id];
-              table.removeChild(fileRow);
-              delete fileRows[file_id];
+          } else {
+            // Check if the group has any visible files
+            let hasVisibleFiles = false;
+            let nextSibling = groupRows[group_id].nextSibling;
+            while (nextSibling && !nextSibling.hasAttribute("data-group-id")) {
+              if (!nextSibling.classList.contains("hidden")) {
+                hasVisibleFiles = true;
+                break;
+              }
+              nextSibling = nextSibling.nextSibling;
+            }
+            if (isFilterActive && !hasVisibleFiles) {
+              groupRows[group_id].classList.add("hidden");
+            } else {
+              groupRows[group_id].classList.remove("hidden");
             }
           }
         }
 
         // Update currentData
         currentData = JSON.parse(JSON.stringify(data));
+      }
+
+      function applyFilter() {
+        const fileRows = window.rowMappings.fileRows;
+        const groupRows = window.rowMappings.groupRows;
+
+        // Apply filter to file rows
+        for (const file_id in fileRows) {
+          const fileRow = fileRows[file_id];
+          const filenameCell = fileRow.children[0];
+          const filename = filenameCell.textContent.toLowerCase();
+
+          if (isFilterActive) {
+            if (filename.includes(filenameFilter)) {
+              fileRow.classList.remove("hidden");
+            } else {
+              fileRow.classList.add("hidden");
+            }
+          } else {
+            fileRow.classList.remove("hidden");
+          }
+        }
+
+        // Hide group rows if they have no visible files
+        for (const group_id in groupRows) {
+          const groupRow = groupRows[group_id];
+          let hasVisibleFiles = false;
+          let nextSibling = groupRow.nextSibling;
+          while (nextSibling && !nextSibling.hasAttribute("data-group-id")) {
+            if (!nextSibling.classList.contains("hidden")) {
+              hasVisibleFiles = true;
+              break;
+            }
+            nextSibling = nextSibling.nextSibling;
+          }
+          if (isFilterActive && !hasVisibleFiles) {
+            groupRow.classList.add("hidden");
+          } else {
+            groupRow.classList.remove("hidden");
+          }
+        }
       }
 
       async function pollData() {

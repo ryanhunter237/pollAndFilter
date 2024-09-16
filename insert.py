@@ -6,7 +6,7 @@ import requests
 
 GROUP_IDS = ["".join(random.choices(string.hexdigits, k=32)) for _ in range(3)]
 EXTENSIONS = [".pdf", ".txt", ".png"]
-MD5s = ["".join(random.choices(string.hexdigits, k=32)) for _ in range(6)]
+MD5s = ["".join(random.choices(string.hexdigits, k=32)) for _ in range(12)]
 TAGS = ["SMALL", "MEDIUM", "LARGE", "OLD", "NEW"]
 NUM_FILES = 16
 
