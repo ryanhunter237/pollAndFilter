@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Files and Tags</title>
+    <style>
+      table,
+      th,
+      td {
+        border: 1px solid black;
+        border-collapse: collapse;
+      }
+      .tag {
+        display: inline-block;
+        border: 1px solid black;
+        padding: 2px;
+        margin: 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <table id="files-table">
+      <!-- The table will be populated by JavaScript -->
+    </table>
+
+    <script>
+      async function fetchData() {
+        const response = await fetch("/api/files_and_tags");
+        const data = await response.json();
+        // Reorganize data for easier comparison
+        let reorganizedData = {};
+        for (const group_id in data) {
+          reorganizedData[group_id] = {};
+          data[group_id].forEach((file) => {
+            reorganizedData[group_id][file.file_id] = {
+              filename: file.filename,
+              tags: file.tags,
+            };
+          });
+        }
+        return reorganizedData;
+      }
+
+      let currentData = {};
+
+      function createFileRow(file_id, file) {
+        const row = document.createElement("tr");
+
+        const filenameCell = document.createElement("td");
+        filenameCell.textContent = file.filename;
+        row.appendChild(filenameCell);
+
+        const tagsCell = document.createElement("td");
+        file.tags.forEach((tag) => {
+          const tagDiv = document.createElement("div");
+          tagDiv.className = "tag";
+          tagDiv.textContent = tag;
+          tagsCell.appendChild(tagDiv);
+        });
+        row.appendChild(tagsCell);
+
+        return row;
+      }
+
+      function updateTable(data) {
+        const table = document.getElementById("files-table");
+
+        // Initialize mappings if not present
+        if (!window.rowMappings) {
+          window.rowMappings = {
+            groupRows: {},
+            fileRows: {},
+          };
+        }
+
+        const groupRows = window.rowMappings.groupRows;
+        const fileRows = window.rowMappings.fileRows;
+
+        // Process additions and updates
+        for (const group_id in data) {
+          if (!currentData.hasOwnProperty(group_id)) {
+            // New group_id
+            const groupRow = document.createElement("tr");
+            const groupCell = document.createElement("td");
+            groupCell.setAttribute("colspan", "2");
+            groupCell.textContent = group_id;
+            groupRow.appendChild(groupCell);
+            table.appendChild(groupRow);
+
+            groupRows[group_id] = groupRow;
+
+            // Add file rows
+            for (const file_id in data[group_id]) {
+              const file = data[group_id][file_id];
+              const fileRow = createFileRow(file_id, file);
+              table.appendChild(fileRow);
+              fileRows[file_id] = fileRow;
+            }
+          } else {
+            // Existing group_id
+            for (const file_id in data[group_id]) {
+              const file = data[group_id][file_id];
+              if (!currentData[group_id].hasOwnProperty(file_id)) {
+                // New file_id
+                const fileRow = createFileRow(file_id, file);
+                // Insert after the last file in the group
+                const groupRow = groupRows[group_id];
+                let nextSibling = groupRow.nextSibling;
+                while (
+                  nextSibling &&
+                  !nextSibling.firstChild.hasAttribute("colspan")
+                ) {
+                  nextSibling = nextSibling.nextSibling;
+                }
+                table.insertBefore(fileRow, nextSibling);
+                fileRows[file_id] = fileRow;
+              } else {
+                // Existing file_id, check for tag updates
+                const currentFile = currentData[group_id][file_id];
+                if (
+                  JSON.stringify(file.tags) !== JSON.stringify(currentFile.tags)
+                ) {
+                  // Update tags
+                  const fileRow = fileRows[file_id];
+                  const tagsCell = fileRow.children[1];
+                  tagsCell.innerHTML = "";
+                  file.tags.forEach((tag) => {
+                    const tagDiv = document.createElement("div");
+                    tagDiv.className = "tag";
+                    tagDiv.textContent = tag;
+                    tagsCell.appendChild(tagDiv);
+                  });
+                }
+              }
+            }
+
+            // Remove files that no longer exist
+            for (const file_id in currentData[group_id]) {
+              if (!data[group_id].hasOwnProperty(file_id)) {
+                const fileRow = fileRows[file_id];
+                table.removeChild(fileRow);
+                delete fileRows[file_id];
+              }
+            }
+          }
+        }
+
+        // Remove groups that no longer exist
+        for (const group_id in currentData) {
+          if (!data.hasOwnProperty(group_id)) {
+            const groupRow = groupRows[group_id];
+            table.removeChild(groupRow);
+            delete groupRows[group_id];
+
+            for (const file_id in currentData[group_id]) {
+              const fileRow = fileRows[file_id];
+              table.removeChild(fileRow);
+              delete fileRows[file_id];
+            }
+          }
+        }
+
+        // Update currentData
+        currentData = JSON.parse(JSON.stringify(data));
+      }
+
+      async function pollData() {
+        try {
+          const data = await fetchData();
+          updateTable(data);
+        } catch (error) {
+          console.error("Error fetching data:", error);
+        }
+        setTimeout(pollData, 5000); // Poll every 5 seconds
+      }
+
+      // Start polling when the page loads
+      window.onload = pollData;
+    </script>
+  </body>
+</html>
